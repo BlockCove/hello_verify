@@ -71,10 +71,10 @@ func MessageHash(data [32]byte, chainID *big.Int, contract common.Address) []byt
 // ---------- EIP-712（与 SignatureVerifier712 合约端一致） ----------
 
 var (
-	eip712DomainTypehash    = crypto.Keccak256Hash([]byte("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"))
-	eip712SignDataTypehash  = crypto.Keccak256Hash([]byte("SignData(bytes32 data)"))
-	eip712NameHash          = crypto.Keccak256Hash([]byte("SignatureVerifier"))
-	eip712VersionHash       = crypto.Keccak256Hash([]byte("1"))
+	eip712DomainTypehash   = crypto.Keccak256Hash([]byte("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"))
+	eip712SignDataTypehash = crypto.Keccak256Hash([]byte("SignData(bytes32 data)"))
+	eip712NameHash         = crypto.Keccak256Hash([]byte("SignatureVerifier"))
+	eip712VersionHash      = crypto.Keccak256Hash([]byte("1"))
 )
 
 // EIP712Digest 计算 EIP-712 摘要（/sign712 路由使用）：
