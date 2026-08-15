@@ -2,8 +2,8 @@
 
 一个最小可用的「链下签名、链上验证」示例项目：
 
-- **backend/**：Go (Gin) 后端，用 `.env` 里的私钥对数据签名，提供 `POST /sign` 接口
-- **contracts/**：Solidity 验证合约，部署后校验签名是否来自 admin
+- **backend/**：Go (Gin) 后端，用 `.env` 里的私钥对数据签名，提供 `POST /sign`（普通 keccak）和 `POST /sign712`（EIP-712）两个接口
+- **contracts/**：Solidity 验证合约，部署后校验签名是否来自 admin，提供普通 keccak 版和 EIP-712 版
 
 ```
 ┌─────────────┐  POST /sign        ┌──────────────────┐
@@ -40,9 +40,11 @@ messageHash = keccak256(abi.encodePacked(data, CHAIN_ID, address(this)))
 │   ├── .env             # 你的私钥等配置（不提交 git）
 │   └── .env.example     # 配置模板
 ├── contracts/
-│   └── SignatureVerifier.sol   # 验证合约（使用 OpenZeppelin ECDSA 库），可直接粘贴进 Remix
+│   ├── SignatureVerifier.sol      # 普通 keccak 版验证合约（OZ ECDSA），可直接粘贴进 Remix
+│   └── SignatureVerifier712.sol   # EIP-712 版验证合约（OZ ECDSA），可直接粘贴进 Remix
 ├── test/
-│   └── SignatureVerifier.test.js  # Hardhat 3 合约测试（node:test + viem）
+│   ├── SignatureVerifier.test.js     # 普通 keccak 版测试（与 Go API 输出交叉比对）
+│   └── SignatureVerifier712.test.js  # EIP-712 版测试（与 Go API 输出交叉比对）
 ├── hardhat.config.js    # Hardhat 3 配置
 ├── package.json         # Hardhat 3 / viem 依赖
 ├── .gitignore
@@ -57,6 +59,7 @@ messageHash = keccak256(abi.encodePacked(data, CHAIN_ID, address(this)))
 cd backend
 cp .env.example .env
 # 编辑 .env，填上 PRIVATE_KEY（这就是链上合约的 admin 私钥）
+# 可选：配置 PRIVATE_KEY_712 / CONTRACT_ADDRESS_712，让 /sign712 使用独立的 admin 私钥和合约地址
 go run .
 ```
 
@@ -66,7 +69,7 @@ go run .
 
 ```bash
 curl http://localhost:8080/signer
-# {"signer":"0xf39F...","defaultChainId":"31337","defaultContract":"0x..."}
+# {"signer":"0xf39F...","signer712":"0x...","defaultChainId":"11155111","defaultContract":"0x4E88...","defaultContract712":"0x..."}
 ```
 
 - `POST /sign`：签名
@@ -94,12 +97,24 @@ curl -X POST http://localhost:8080/sign \
 }
 ```
 
-> `chainId` / `contractAddress` 也可以不传，会使用 `.env` 里的默认值。
+> `chainId` / `contractAddress` 也可以不传，会使用 `.env` 里的默认值：`/sign` 取 `CONTRACT_ADDRESS`，`/sign712` 取 `CONTRACT_ADDRESS_712`（未配置时回退到 `CONTRACT_ADDRESS`）。两个接口可以同时服务两个不同的合约。
+
+- `POST /sign712`：EIP-712 结构化签名（配合 `SignatureVerifier712.sol` 使用），请求格式与 `/sign` 完全一致，返回的 `messageHash` 是 EIP-712 摘要（`keccak256("\x19\x01" ‖ domainSeparator ‖ structHash)`）：
+
+```bash
+curl -X POST http://localhost:8080/sign712 \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "data": "0x000000000000000000000000000000000000000000000000000000000000002a",
+    "chainId": "11155111",
+    "contractAddress": "0x4E8899a51bb8C66F89f2899E440e78C8be9dD1a8"
+  }'
+```
 
 ### 2. 部署合约（Remix）
 
 1. 打开 [remix.ethereum.org](https://remix.ethereum.org)
-2. 左侧新建文件 `SignatureVerifier.sol`，粘贴 `contracts/SignatureVerifier.sol` 的内容
+2. 左侧新建文件并粘贴合约内容：EIP-712 版用 `contracts/SignatureVerifier712.sol`（推荐），普通 keccak 版用 `contracts/SignatureVerifier.sol`
 3. 切到 Solidity Compiler 编译（0.8.20 及以上）。合约 import 了 `@openzeppelin/contracts` 的 ECDSA 库，Remix 编译时会自动联网解析，无需手动下载
 4. 切到 Deploy & Run Transactions：
    - Environment 选 `Injected Provider - MetaMask`（测试网）或 `Remix VM`（本地模拟）
@@ -109,7 +124,7 @@ curl -X POST http://localhost:8080/sign \
 
 ### 3. 联调验证
 
-1. 用真实合约地址 + chainId 调一次 `POST /sign`，拿到 `signature`
+1. 用真实合约地址 + chainId 调一次签名接口拿到 `signature`（EIP-712 合约调 `POST /sign712`，普通版调 `POST /sign`）
 2. 回到 Remix，展开合约，调用 `verify`：
    - `data`：签名的 bytes32（如 `0x0000...2a`）
    - `signature`：后端返回的 65 字节签名
@@ -118,7 +133,7 @@ curl -X POST http://localhost:8080/sign \
 辅助调试函数：
 
 - `recoverSigner(data, signature)`：单独看恢复出的签名者地址
-- `messageHash(data)`：和后端返回的 messageHash 对账
+- `messageHash(data)`（普通版）/ `digest(data)`、`domainSeparator()`（712 版）：和后端返回的 messageHash 对账
 - `setAdmin(newAdmin)`：更换管理员（仅当前 admin 可调）
 
 ## 本地编译与测试（Hardhat 3）
@@ -130,9 +145,9 @@ npm install        # 安装 hardhat / viem / openzeppelin 依赖
 npx hardhat test   # 编译合约并跑测试
 ```
 
-测试内容包括：
+测试内容包括（两版合约各 5 条）：
 
-- messageHash 与 Go 后端 API 实际输出的交叉比对（保证两端哈希布局一致）
+- 与 Go 后端 API 实际输出的交叉比对：普通版比 `messageHash`，712 版比 `digest`（712 摘要另用 viem 的 `hashTypedData` 独立复算，Go / 合约 / viem 三方一致才通过）
 - admin 签名通过 verify / 错误 data 拒绝 / 非 admin 签名拒绝
 - setAdmin 权限校验
 
@@ -165,76 +180,37 @@ function claim(bytes32 data, bytes calldata signature) external {
 
 ## EIP-712 的玩法与区别
 
-本项目用的是**普通 keccak 哈希签名**（与参考代码一致）。生产项目更推荐 **EIP-712 结构化签名**。
+项目内置了**两种签名方案**，合约与接口一一对应：
+
+| 方案 | 合约 | 后端接口 | 适用场景 |
+|---|---|---|---|
+| 普通 keccak | `contracts/SignatureVerifier.sol` | `POST /sign` | 内部系统、demo，实现最简单 |
+| EIP-712 | `contracts/SignatureVerifier712.sol` | `POST /sign712` | 面向用户签名，钱包明文展示、防钓鱼（推荐） |
 
 **EIP-712 是什么**：把签名内容定义为带类型的结构化数据（domain + struct），签名前先计算
 `keccak256("\x19\x01" ‖ domainSeparator ‖ structHash)`。钱包（如 MetaMask）可以解析并**明文展示**你要签的内容。
 
-**区别对比**：
+本项目 712 版的 domain 定义（Go 端 `EIP712Digest()` 与合约端 `digest()` 保持一致）：
 
-| | 本项目（普通 keccak） | EIP-712 |
+```
+name    = "SignatureVerifier"
+version = "1"
+chainId / verifyingContract 自动取部署时的值
+签名类型 = SignData(bytes32 data)
+```
+
+**两种方案的区别**：
+
+| | 普通 keccak | EIP-712 |
 |---|---|---|
 | 消息哈希 | `keccak256(abi.encodePacked(data, chainId, address))` | `keccak256("\x19\x01" ‖ domainSeparator ‖ structHash)` |
 | 钱包可读性 | 一串 hex，用户看不懂 | 显示结构化字段（name/version/chainId/数据） |
 | 防钓鱼 | 靠自定义规则做域分离 | 钱包统一展示 domain，用户能识别伪造站点 |
 | 实现复杂度 | 低 | 中 |
-| 适用场景 | demo、内部系统 | 面向用户签名、跨 dApp 的标准场景 |
 
-**升级成 EIP-712 的关键改动**（示意代码，非本项目实现）：
+**正确性保证**：EIP-712 摘要由 Go 端（`backend/main.go` 的 `EIP712Digest`）和合约端（`digest()`）分别实现，测试里再用 viem 的 `hashTypedData` 独立复算同一常量，三方一致才通过（见 `test/SignatureVerifier712.test.js`）。
 
-Go 端：
-
-```go
-import (
-    "github.com/ethereum/go-ethereum/common/math"
-    "github.com/ethereum/go-ethereum/signer/core/apitypes"
-)
-
-typedData := apitypes.TypedData{
-    Types: apitypes.Types{
-        "EIP712Domain": {
-            {Name: "name", Type: "string"},
-            {Name: "version", Type: "string"},
-            {Name: "chainId", Type: "uint256"},
-            {Name: "verifyingContract", Type: "address"},
-        },
-        "SignData": {{Name: "data", Type: "bytes32"}},
-    },
-    PrimaryType: "SignData",
-    Domain: apitypes.TypedDataDomain{
-        Name:              "SignatureVerifier",
-        Version:           "1",
-        ChainId:           math.NewHexOrDecimal256(31337),
-        VerifyingContract: contractAddr.Hex(),
-    },
-    Message: apitypes.TypedDataMessage{"data": dataHex},
-}
-domainSeparator, _ := typedData.HashStruct("EIP712Domain", typedData.Domain.Map())
-structHash, _ := typedData.HashStruct("SignData", typedData.Message)
-digest := crypto.Keccak256([]byte{0x19, 0x01}, domainSeparator, structHash)
-sig, _ := crypto.Sign(digest, privKey)
-```
-
-合约端：
-
-```solidity
-import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-
-using ECDSA for bytes32;
-
-bytes32 private constant DOMAIN_TYPEHASH =
-    keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
-bytes32 private constant SIGN_DATA_TYPEHASH = keccak256("SignData(bytes32 data)");
-
-function verifyEIP712(bytes32 data, bytes calldata signature) external view returns (bool, address) {
-    bytes32 separator = keccak256(abi.encode(
-        DOMAIN_TYPEHASH, keccak256("SignatureVerifier"), keccak256("1"), CHAIN_ID, address(this)));
-    bytes32 digest = keccak256(abi.encodePacked(
-        "\x19\x01", separator, keccak256(abi.encode(SIGN_DATA_TYPEHASH, data))));
-    address signer = digest.recover(signature);
-    return (signer == admin, signer);
-}
-```
+> 前端若需要用户用钱包（MetaMask）签名，直接用 viem 的 `signTypedData`，domain/types 按上面的定义传即可，签名结果可以直接交给合约 `verify`。
 
 ## 安全注意事项
 
@@ -243,7 +219,7 @@ function verifyEIP712(bytes32 data, bytes calldata signature) external view retu
 3. **重放攻击**：
    - 跨链 / 跨合约重放：哈希里已含 `chainId + 合约地址` ✅
    - 同合约重复提交：需要业务合约加 `usedSignatures` mapping + nonce（见玩法示例）⚠️
-4. 生产环境建议升级 EIP-712，并给签名加过期时间（如把 deadline 打包进 data）
+4. 生产环境建议使用 EIP-712 版（`SignatureVerifier712.sol` + `POST /sign712`），并给签名加过期时间（如把 deadline 打包进 data）
 
 ## 常见问题
 
@@ -251,3 +227,4 @@ function verifyEIP712(bytes32 data, bytes calldata signature) external view retu
 - **Remix 里 data 怎么填？** bytes32 是 32 字节 hex：`0x` + 64 个字符，不足前面补 0
 - **签名者地址怎么算？** 后端 `GET /signer` 返回的就是，部署时把它传给构造函数作为 admin
 - **换了一条链要重新部署吗？** 要。`CHAIN_ID` 是合约部署时快照的，换链必须重新部署
+- **两个合约 / 两个接口怎么选？** 见「EIP-712 的玩法与区别」里的选型表：面向用户签名用 712 版，内部系统用普通版

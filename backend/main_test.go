@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"math/big"
 	"strings"
 	"testing"
@@ -65,6 +66,21 @@ func TestSignAndRecover(t *testing.T) {
 	}
 	if got := crypto.PubkeyToAddress(*pub); got != signer.Address() {
 		t.Fatalf("恢复地址 %s 与签名者 %s 不一致", got.Hex(), signer.Address().Hex())
+	}
+}
+
+func TestEIP712DigestKnownVector(t *testing.T) {
+	// 该摘要由后端 /sign712 冒烟测试实际产出；
+	// Hardhat 测试中另用 viem 的 hashTypedData 独立复算同一常量，
+	// 两套独立实现一致即证明摘要符合 EIP-712 规范。
+	data := [32]byte{31: 0x2a}
+	chainID := big.NewInt(31337)
+	contract := common.HexToAddress("0x5FbDB2315678afecb367f032d93F642f64180aa3")
+	want := common.HexToHash("0x33fbb21e1ab576e8d8967b86bac2fe53a58d88251f2c6f0aeb3baf78b3a2d931")
+
+	got := EIP712Digest(data, chainID, contract)
+	if !bytes.Equal(got, want[:]) {
+		t.Fatalf("EIP-712 摘要不一致:\nwant %s\ngot  %x", want.Hex(), got)
 	}
 }
 
