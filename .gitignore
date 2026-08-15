@@ -1,0 +1,15 @@
+# 密钥文件，绝不提交
+backend/.env
+
+# Go 编译产物
+backend/hello-verify-backend
+backend/server
+*.exe
+
+# Node / Hardhat
+node_modules/
+artifacts/
+cache/
+
+# 系统文件
+.DS_Store

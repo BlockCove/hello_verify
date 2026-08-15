@@ -1,0 +1,28 @@
+{
+  "name": "hello_verify",
+  "version": "1.0.0",
+  "description": "一个最小可用的「链下签名、链上验证」示例项目：",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BlockCove/hello_verify.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/BlockCove/hello_verify/issues"
+  },
+  "homepage": "https://github.com/BlockCove/hello_verify#readme",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox-viem": "^5.0.7",
+    "@nomicfoundation/hardhat-viem": "^3.0.9",
+    "@openzeppelin/contracts": "^5.6.1",
+    "hardhat": "^3.13.0",
+    "viem": "^2.55.16"
+  }
+}
